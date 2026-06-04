@@ -1,0 +1,100 @@
+name: "Deploy Frontend App (React Build · S3)"
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'index.html'
+      - 'package.json'
+      - 'vite.config.js'
+      - 'tailwind.config.js'
+      - 'postcss.config.js'
+      - 'infrastructure/**'
+      - '.github/workflows/deploy.yml'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment'
+        required: true
+        default: dev
+        type: choice
+        options: [dev, sit, stage, prod]
+
+env:
+  AWS_REGION:   eu-north-1
+  PROJECT_NAME: api-portal
+  ENVIRONMENT:  ${{ github.event.inputs.environment || 'dev' }}
+  TF_VERSION:   '~1.7'
+
+jobs:
+  deploy:
+    name: "[${{ github.event.inputs.environment || 'dev' }}] Frontend — React Build · S3 Upload"
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write   # Required for OIDC authentication
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 18
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          role-session-name: api-portal-frontend-${{ env.ENVIRONMENT }}
+          aws-region:        ${{ env.AWS_REGION }}
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Build React app
+        run: npm run build
+        env:
+          # Fallback endpoint for local dev only.
+          # In production, config.js is injected by Terraform from SSM (no rebuild needed).
+          VITE_API_ENDPOINT: ""
+
+      - name: Setup Terraform ${{ env.TF_VERSION }}
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Terraform Init
+        working-directory: infrastructure
+        run: |
+          terraform init \
+            -backend-config="key=${{ env.PROJECT_NAME }}/frontend/${{ env.ENVIRONMENT }}/terraform.tfstate"
+
+      - name: Terraform Validate
+        working-directory: infrastructure
+        run: terraform validate
+
+      - name: Terraform Plan
+        working-directory: infrastructure
+        run: |
+          terraform plan \
+            -var-file="envs/${{ env.ENVIRONMENT }}.tfvars" \
+            -out=tfplan
+
+      - name: Terraform Apply
+        working-directory: infrastructure
+        run: terraform apply -auto-approve tfplan
+
+      - name: Show outputs
+        working-directory: infrastructure
+        run: |
+          echo ""
+          echo "══════════════════════════════════════════════"
+          echo "  ✅ FRONTEND DEPLOYED  |  env=${{ env.ENVIRONMENT }}"
+          echo "══════════════════════════════════════════════"
+          echo "  GUI URL:"
+          terraform output -raw gui_url
+          echo ""
+          echo "══════════════════════════════════════════════"

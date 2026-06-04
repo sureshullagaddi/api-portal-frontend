@@ -1,0 +1,265 @@
+import { useState } from 'react';
+
+const API_TYPES = [
+  { value: 'http-public',     label: '🌐 HTTP Public — No auth (public endpoint)',             desc: 'No authentication — anyone can call this endpoint' },
+  { value: 'http-jwt',        label: '🔐 HTTP JWT — Cognito token (customer portal)',          desc: 'Cognito IdToken required — reuses existing User Pool' },
+  { value: 'http-custom-key', label: '🔑 HTTP Custom Key — X-Api-Key header (B2B partner)',   desc: 'X-Api-Key header validated by the existing Lambda authorizer' },
+  { value: 'http-iam',        label: '🛡️ HTTP IAM — AWS SigV4 (internal service)',            desc: 'AWS SigV4 signing required — for internal AWS services only' },
+  { value: 'rest-usage-plan', label: '📊 REST Usage Plan — per-partner quota (rate limiting)', desc: 'REST API v1 with per-partner daily quota enforced natively by AWS' },
+];
+
+const HTTP_METHODS  = ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'];
+const ENVIRONMENTS  = ['dev', 'sit', 'stage', 'prod'];
+const INITIAL_FORM  = {
+  api_name: '', api_type: '', http_method: 'GET', route_path: '/data',
+  environment: 'dev', partner_name: '', quota_per_day: 5000, rate_limit_per_second: 50,
+};
+
+export default function CreateApiForm({ onSubmit, onError }) {
+  const [form, setForm]             = useState(INITIAL_FORM);
+  const [loading, setLoading]       = useState(false);
+  const [errorMsg, setErrorMsg]     = useState('');
+  const [errorDetails, setErrorDetails] = useState(null);
+  const [stackOpen, setStackOpen]   = useState(false);
+
+  const isRestApi = form.api_type === 'rest-usage-plan';
+  const apiDesc   = API_TYPES.find(t => t.value === form.api_type)?.desc ?? '';
+
+  const set = (field) => (e) => {
+    setErrorMsg('');
+    setErrorDetails(null);
+    setStackOpen(false);
+    setForm(f => ({ ...f, [field]: e.target.type === 'number' ? Number(e.target.value) : e.target.value }));
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    setErrorMsg('');
+    setErrorDetails(null);
+    try {
+      await onSubmit({
+        api_name:              form.api_name.trim(),
+        api_type:              form.api_type,
+        http_method:           form.http_method,
+        route_path:            form.route_path.trim(),
+        environment:           form.environment,
+        partner_name:          isRestApi ? form.partner_name || 'partner' : undefined,
+        quota_per_day:         isRestApi ? form.quota_per_day : undefined,
+        rate_limit_per_second: isRestApi ? form.rate_limit_per_second : undefined,
+      });
+      setForm(INITIAL_FORM);
+      setErrorMsg('');
+      setErrorDetails(null);
+      setStackOpen(false);
+    } catch (err) {
+      const msg = err.message || 'Unknown error — check browser console for details';
+      setErrorMsg(msg);
+      setErrorDetails(err.details && typeof err.details === 'object' ? err.details : null);
+      onError(msg);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+      {/* Card header */}
+      <div className="px-6 py-4 border-b border-gray-100 bg-gray-50">
+        <h2 className="font-semibold text-gray-800">Create New API</h2>
+        <p className="text-xs text-gray-500 mt-1">Provisions a new API Gateway with the selected auth type</p>
+      </div>
+
+      <form onSubmit={handleSubmit} className="p-6 space-y-5">
+
+        {/* API Name */}
+        <Field label="API Name *" hint="Unique identifier — used as AWS resource prefix">
+          <input
+            type="text" value={form.api_name} onChange={set('api_name')} required
+            placeholder="e.g. payments, partner-hsbc"
+            pattern="[a-z][a-z0-9\-]{2,28}[a-z0-9]"
+            title="Lowercase letters, numbers, hyphens (4-30 chars)"
+            className={input}
+          />
+        </Field>
+
+        {/* API Type */}
+        <Field label="API Type *" hint={apiDesc}>
+          <select value={form.api_type} onChange={set('api_type')} required className={input}>
+            <option value="">Select auth type...</option>
+            {API_TYPES.map(t => (
+              <option key={t.value} value={t.value}>{t.label}</option>
+            ))}
+          </select>
+        </Field>
+
+        {/* Method + Route */}
+        <div className="grid grid-cols-3 gap-3">
+          <Field label="Method *">
+            <select value={form.http_method} onChange={set('http_method')} required className={input}>
+              {HTTP_METHODS.map(m => <option key={m}>{m}</option>)}
+            </select>
+          </Field>
+          <div className="col-span-2">
+            <Field label="Route Path *">
+              <input
+                type="text" value={form.route_path} onChange={set('route_path')} required
+                placeholder="/payments"
+                className={input}
+              />
+            </Field>
+          </div>
+        </div>
+
+        {/* Environment */}
+        <Field label="Environment *">
+          <select value={form.environment} onChange={set('environment')} required className={input}>
+            {ENVIRONMENTS.map(e => <option key={e}>{e}</option>)}
+          </select>
+        </Field>
+
+        {/* REST API usage plan fields — only shown for rest-usage-plan */}
+        {isRestApi && (
+          <div className="space-y-4 p-4 bg-blue-50 rounded-lg border border-blue-100 fade-in">
+            <p className="text-xs font-semibold text-blue-700 uppercase tracking-wide">
+              REST API — Usage Plan Settings
+            </p>
+            <Field label="Partner Name">
+              <input
+                type="text" value={form.partner_name} onChange={set('partner_name')}
+                placeholder="e.g. hsbc, barclays"
+                className={input}
+              />
+            </Field>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Quota / Day">
+                <input type="number" value={form.quota_per_day} onChange={set('quota_per_day')} min={1} className={input} />
+              </Field>
+              <Field label="Rate (req/s)">
+                <input type="number" value={form.rate_limit_per_second} onChange={set('rate_limit_per_second')} min={1} className={input} />
+              </Field>
+            </div>
+          </div>
+        )}
+
+        {/* Inline error banner — persists until user edits form or retries */}
+        {errorMsg && (
+          <div className="flex items-start gap-3 p-4 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
+            {/* Error icon */}
+            <svg className="w-5 h-5 mt-0.5 shrink-0 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+            </svg>
+            <div className="flex-1 min-w-0 space-y-1.5">
+              <p className="font-semibold">API creation failed</p>
+
+              {/* Full error message */}
+              <p className="text-red-600 break-words whitespace-pre-wrap">{errorMsg}</p>
+
+              {/* Structured AWS error details */}
+              {errorDetails && (
+                <div className="mt-2 pt-2 border-t border-red-200 space-y-1 text-xs font-mono text-red-500">
+                  {errorDetails.code && errorDetails.code !== 'UnknownError' && (
+                    <p><span className="font-semibold">Code:</span> {errorDetails.code}</p>
+                  )}
+                  {errorDetails.httpStatus && (
+                    <p><span className="font-semibold">HTTP Status:</span> {errorDetails.httpStatus}</p>
+                  )}
+                  {errorDetails.fault && (
+                    <p><span className="font-semibold">Fault:</span> {errorDetails.fault}</p>
+                  )}
+                  {errorDetails.requestId && (
+                    <p className="break-all"><span className="font-semibold">AWS RequestId:</span> {errorDetails.requestId}</p>
+                  )}
+                  {errorDetails.detail && (
+                    <p className="break-words whitespace-pre-wrap"><span className="font-semibold">Detail:</span> {errorDetails.detail}</p>
+                  )}
+                  {errorDetails.reason && (
+                    <p className="break-words whitespace-pre-wrap"><span className="font-semibold">Reason:</span> {errorDetails.reason}</p>
+                  )}
+                  {errorDetails.OAuthError && (
+                    <p className="break-words whitespace-pre-wrap"><span className="font-semibold">OAuth Error:</span> {errorDetails.OAuthError}</p>
+                  )}
+                </div>
+              )}
+
+              {/* Full stack trace — collapsible */}
+              {errorDetails?.stack && (
+                <div className="mt-2">
+                  <button
+                    type="button"
+                    onClick={() => setStackOpen(o => !o)}
+                    className="flex items-center gap-1 text-xs text-red-400 hover:text-red-600 font-mono underline underline-offset-2"
+                  >
+                    <svg className={`w-3 h-3 transition-transform ${stackOpen ? 'rotate-90' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                    </svg>
+                    {stackOpen ? 'Hide' : 'Show'} stack trace
+                  </button>
+                  {stackOpen && (
+                    <pre className="mt-2 p-3 bg-red-900 text-red-100 text-xs rounded-lg overflow-x-auto overflow-y-auto max-h-64 whitespace-pre font-mono leading-relaxed">
+                      {errorDetails.stack}
+                    </pre>
+                  )}
+                </div>
+              )}
+
+              {/* Hint to check CloudWatch */}
+              <p className="text-xs text-red-400 mt-1">
+                Check CloudWatch Logs for the full stack trace.
+              </p>
+            </div>
+            {/* Dismiss button */}
+            <button
+              type="button"
+              onClick={() => { setErrorMsg(''); setErrorDetails(null); setStackOpen(false); }}
+              className="shrink-0 text-red-400 hover:text-red-600 transition-colors"
+              aria-label="Dismiss error"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+        )}
+
+        {/* Submit */}
+        <button
+          type="submit" disabled={loading}
+          className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white font-medium py-2.5 px-4 rounded-lg text-sm transition-colors flex items-center justify-center gap-2"
+        >
+          {loading ? (
+            <>
+              <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"/>
+              </svg>
+              Creating...
+            </>
+          ) : (
+            <>
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+              </svg>
+              Create API
+            </>
+          )}
+        </button>
+      </form>
+    </div>
+  );
+}
+
+// Shared field wrapper
+function Field({ label, hint, children }) {
+  return (
+    <div>
+      <label className="block text-sm font-medium text-gray-700 mb-1">{label}</label>
+      {children}
+      {hint && <p className="text-xs text-gray-400 mt-1">{hint}</p>}
+    </div>
+  );
+}
+
+const input = 'w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white';
+
