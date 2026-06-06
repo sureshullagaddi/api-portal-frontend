@@ -1,0 +1,134 @@
+name: 🔥 Terraform Destroy — Frontend Infrastructure
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Environment to destroy (dev / sit / stage / prod)"
+        required: true
+        type: choice
+        options: [dev, sit, stage, prod]
+      confirm:
+        description: 'Type "destroy" to confirm — this permanently removes all AWS resources'
+        required: true
+        type: string
+
+# Prevent concurrent destroy runs against the same state file
+concurrency:
+  group: terraform-frontend-${{ github.event.inputs.environment }}
+  cancel-in-progress: false
+
+env:
+  TF_VERSION:     "~1.7"
+  AWS_REGION:     eu-north-1
+  PROJECT_NAME:   api-portal
+  ENVIRONMENT:    ${{ github.event.inputs.environment }}
+  TF_WORKING_DIR: infrastructure
+
+jobs:
+  # ── Safety gate ────────────────────────────────────────────────────────────
+  preflight:
+    name: 🛡️ Safety Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify confirmation word
+        run: |
+          if [ "${{ github.event.inputs.confirm }}" != "destroy" ]; then
+            echo "❌ Confirmation mismatch — you must type exactly: destroy"
+            exit 1
+          fi
+          echo "✅ Confirmation accepted — proceeding with destroy"
+
+      - name: Announce target
+        run: |
+          echo "══════════════════════════════════════════════"
+          echo "  🔥 DESTROY TARGET"
+          echo "  env=${{ github.event.inputs.environment }}"
+          echo "  repo=${{ github.repository }}"
+          echo "  triggered by=${{ github.actor }}"
+          echo "══════════════════════════════════════════════"
+
+  # ── Terraform Destroy ──────────────────────────────────────────────────────
+  destroy:
+    name: 🔥 Terraform Destroy (${{ github.event.inputs.environment }})
+    runs-on: ubuntu-latest
+    needs: preflight
+    environment: ${{ github.event.inputs.environment }}  # requires GitHub env approval if configured
+
+    defaults:
+      run:
+        working-directory: ${{ env.TF_WORKING_DIR }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ── AWS credentials ───────────────────────────────────────────────────
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token:     ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region:            ${{ env.AWS_REGION }}
+
+      # ── Terraform setup ───────────────────────────────────────────────────
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Terraform Init
+        run: terraform init
+
+      # ── Plan the destroy (shows what will be removed) ─────────────────────
+      - name: Terraform Plan Destroy
+        id: plan
+        run: |
+          terraform plan \
+            -destroy \
+            -var-file="envs/${{ env.ENVIRONMENT }}.tfvars" \
+            -out=destroy.tfplan \
+            -no-color 2>&1 | tee plan-output.txt
+
+          echo ""
+          echo "══════════════════════════════════════════════"
+          echo "  📋 Destroy plan complete — review above"
+          echo "══════════════════════════════════════════════"
+
+      # ── Upload plan as artifact for audit trail ────────────────────────────
+      - name: Upload destroy plan artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: destroy-plan-${{ env.ENVIRONMENT }}-${{ github.run_id }}
+          path: |
+            ${{ env.TF_WORKING_DIR }}/plan-output.txt
+            ${{ env.TF_WORKING_DIR }}/destroy.tfplan
+          retention-days: 30
+
+      # ── Execute destroy ───────────────────────────────────────────────────
+      - name: Terraform Destroy
+        run: |
+          terraform apply \
+            -auto-approve \
+            destroy.tfplan
+
+      # ── Summary ───────────────────────────────────────────────────────────
+      - name: Post-destroy summary
+        run: |
+          echo ""
+          echo "══════════════════════════════════════════════"
+          echo "  ✅ FRONTEND DESTROYED  |  env=${{ env.ENVIRONMENT }}"
+          echo "  All S3 / website resources removed."
+          echo "══════════════════════════════════════════════"
+
+      # ── Notify on failure ─────────────────────────────────────────────────
+      - name: Report failure
+        if: failure()
+        run: |
+          echo "══════════════════════════════════════════════"
+          echo "  ❌ DESTROY FAILED  |  env=${{ env.ENVIRONMENT }}"
+          echo "  Check logs above and AWS Console."
+          echo "  State lock may need manual release."
+          echo "══════════════════════════════════════════════"
+

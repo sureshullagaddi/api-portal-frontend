@@ -13,6 +13,7 @@ const ENVIRONMENTS  = ['dev', 'sit', 'stage', 'prod'];
 const INITIAL_FORM  = {
   api_name: '', api_type: '', http_method: 'GET', route_path: '/data',
   environment: 'dev', partner_name: '', quota_per_day: 5000, rate_limit_per_second: 50,
+  existing_lambda_arn: '', existing_lambda_function_name: '',
 };
 
 export default function CreateApiForm({ onSubmit, onError }) {
@@ -22,8 +23,9 @@ export default function CreateApiForm({ onSubmit, onError }) {
   const [errorDetails, setErrorDetails] = useState(null);
   const [stackOpen, setStackOpen]   = useState(false);
 
-  const isRestApi = form.api_type === 'rest-usage-plan';
-  const apiDesc   = API_TYPES.find(t => t.value === form.api_type)?.desc ?? '';
+  const isRestApi  = form.api_type === 'rest-usage-plan';
+  const isHttpApi  = form.api_type !== '' && !isRestApi;
+  const apiDesc    = API_TYPES.find(t => t.value === form.api_type)?.desc ?? '';
 
   const set = (field) => (e) => {
     setErrorMsg('');
@@ -39,14 +41,16 @@ export default function CreateApiForm({ onSubmit, onError }) {
     setErrorDetails(null);
     try {
       await onSubmit({
-        api_name:              form.api_name.trim(),
-        api_type:              form.api_type,
-        http_method:           form.http_method,
-        route_path:            form.route_path.trim(),
-        environment:           form.environment,
-        partner_name:          isRestApi ? form.partner_name || 'partner' : undefined,
-        quota_per_day:         isRestApi ? form.quota_per_day : undefined,
-        rate_limit_per_second: isRestApi ? form.rate_limit_per_second : undefined,
+        api_name:                    form.api_name.trim(),
+        api_type:                    form.api_type,
+        http_method:                 form.http_method,
+        route_path:                  form.route_path.trim(),
+        environment:                 form.environment,
+        partner_name:                isRestApi ? form.partner_name || 'partner' : undefined,
+        quota_per_day:               isRestApi ? form.quota_per_day : undefined,
+        rate_limit_per_second:       isRestApi ? form.rate_limit_per_second : undefined,
+        existing_lambda_arn:         isHttpApi ? form.existing_lambda_arn.trim() || undefined : undefined,
+        existing_lambda_function_name: isHttpApi ? form.existing_lambda_function_name.trim() || undefined : undefined,
       });
       setForm(INITIAL_FORM);
       setErrorMsg('');
@@ -117,6 +121,29 @@ export default function CreateApiForm({ onSubmit, onError }) {
             {ENVIRONMENTS.map(e => <option key={e}>{e}</option>)}
           </select>
         </Field>
+
+        {/* Lambda target fields — required for all HTTP API types */}
+        {isHttpApi && (
+          <div className="space-y-4 p-4 bg-amber-50 rounded-lg border border-amber-100 fade-in">
+            <p className="text-xs font-semibold text-amber-700 uppercase tracking-wide">
+              Lambda Target — which function should this API route to?
+            </p>
+            <Field label="Existing Lambda ARN *" hint="Full ARN of the Lambda function to integrate (arn:aws:lambda:…)">
+              <input
+                type="text" value={form.existing_lambda_arn} onChange={set('existing_lambda_arn')} required={isHttpApi}
+                placeholder="arn:aws:lambda:eu-north-1:123456789012:function:my-function"
+                className={input}
+              />
+            </Field>
+            <Field label="Existing Lambda Function Name *" hint="Short function name (must match the ARN above)">
+              <input
+                type="text" value={form.existing_lambda_function_name} onChange={set('existing_lambda_function_name')} required={isHttpApi}
+                placeholder="my-function"
+                className={input}
+              />
+            </Field>
+          </div>
+        )}
 
         {/* REST API usage plan fields — only shown for rest-usage-plan */}
         {isRestApi && (
