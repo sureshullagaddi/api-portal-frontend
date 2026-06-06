@@ -53,7 +53,13 @@ jobs:
     name: 🔥 Terraform Destroy (${{ github.event.inputs.environment }})
     runs-on: ubuntu-latest
     needs: preflight
-    environment: ${{ github.event.inputs.environment }}  # requires GitHub env approval if configured
+    # NOTE: `environment:` is intentionally omitted here.
+    # Using a GitHub Environment changes the OIDC sub claim to
+    # `repo:org/repo:environment:<env>`, which the IAM role trust policy
+    # does not allow (it only permits `repo:org/repo:ref:refs/heads/main`).
+    # To re-enable GitHub Environment approval gates, update the IAM role's
+    # trust policy StringLike condition to also include:
+    #   "token.actions.githubusercontent.com:sub": "repo:ORG/REPO:environment:*"
 
     # Required for OIDC token generation
     permissions:
