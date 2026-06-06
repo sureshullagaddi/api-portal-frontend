@@ -11,4 +11,5 @@ output "s3_bucket_name" {
 output "backend_api_url" {
   description = "Backend API URL (read from SSM)"
   value       = data.aws_ssm_parameter.backend_api_url.value
+  sensitive   = true
 }
