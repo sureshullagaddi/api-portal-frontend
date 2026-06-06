@@ -55,6 +55,11 @@ jobs:
     needs: preflight
     environment: ${{ github.event.inputs.environment }}  # requires GitHub env approval if configured
 
+    # Required for OIDC token generation
+    permissions:
+      id-token: write
+      contents: read
+
     defaults:
       run:
         working-directory: ${{ env.TF_WORKING_DIR }}
@@ -63,14 +68,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # ── AWS credentials ───────────────────────────────────────────────────
+      # ── AWS credentials (OIDC — matches deploy workflow) ──────────────────
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-session-token:     ${{ secrets.AWS_SESSION_TOKEN }}
-          aws-region:            ${{ env.AWS_REGION }}
+          role-to-assume:    ${{ secrets.AWS_ROLE_ARN }}
+          role-session-name: api-portal-frontend-${{ env.ENVIRONMENT }}
+          aws-region:        ${{ env.AWS_REGION }}
+          audience:          sts.amazonaws.com
 
       # ── Terraform setup ───────────────────────────────────────────────────
       - name: Setup Terraform
@@ -79,7 +84,9 @@ jobs:
           terraform_version: ${{ env.TF_VERSION }}
 
       - name: Terraform Init
-        run: terraform init
+        run: |
+          terraform init \
+            -backend-config="key=api-portal/frontend/${{ env.ENVIRONMENT }}/terraform.tfstate"
 
       # ── Plan the destroy (shows what will be removed) ─────────────────────
       - name: Terraform Plan Destroy
