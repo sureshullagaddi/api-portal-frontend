@@ -87,6 +87,22 @@ jobs:
         working-directory: infrastructure
         run: terraform apply -auto-approve tfplan
 
+      # ── Force-sync React build to S3 (bypasses Terraform etag check) ──────
+      - name: Sync React build to S3
+        working-directory: infrastructure
+        run: |
+          BUCKET=$(terraform output -raw s3_bucket_name)
+          echo "Syncing dist/ → s3://$BUCKET"
+          aws s3 sync ../dist/ s3://$BUCKET/ \
+            --delete \
+            --cache-control "no-cache" \
+            --exclude "assets/*"
+          # Re-sync assets with long-lived cache (content-hashed by Vite)
+          aws s3 sync ../dist/assets/ s3://$BUCKET/assets/ \
+            --delete \
+            --cache-control "public, max-age=31536000, immutable"
+          echo "✅ Sync complete"
+
       - name: Show outputs
         working-directory: infrastructure
         run: |
