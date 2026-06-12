@@ -12,7 +12,7 @@ const HTTP_METHODS  = ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'];
 const ENVIRONMENTS  = ['dev', 'sit', 'stage', 'prod'];
 const INITIAL_FORM  = {
   api_name: '', api_type: '', http_method: 'GET', route_path: '/data',
-  environment: 'dev', partner_name: '', quota_per_day: 5000, rate_limit_per_second: 50,
+  environment: 'dev',
 };
 
 export default function CreateApiForm({ onSubmit, onError }) {
@@ -23,7 +23,6 @@ export default function CreateApiForm({ onSubmit, onError }) {
   const [stackOpen, setStackOpen]   = useState(false);
 
   const isRestApi  = form.api_type === 'rest-usage-plan';
-  const isHttpApi  = form.api_type !== '' && !isRestApi;
   const apiDesc    = API_TYPES.find(t => t.value === form.api_type)?.desc ?? '';
 
   const set = (field) => (e) => {
@@ -45,9 +44,6 @@ export default function CreateApiForm({ onSubmit, onError }) {
         http_method:                 form.http_method,
         route_path:                  form.route_path.trim(),
         environment:                 form.environment,
-        partner_name:                isRestApi ? form.partner_name || 'partner' : undefined,
-        quota_per_day:               isRestApi ? form.quota_per_day : undefined,
-        rate_limit_per_second:       isRestApi ? form.rate_limit_per_second : undefined,
       });
       setForm(INITIAL_FORM);
       setErrorMsg('');
@@ -120,31 +116,7 @@ export default function CreateApiForm({ onSubmit, onError }) {
         </Field>
 
 
-        {/* REST API usage plan fields — only shown for rest-usage-plan */}
-        {isRestApi && (
-          <div className="space-y-4 p-4 bg-blue-50 rounded-lg border border-blue-100 fade-in">
-            <p className="text-xs font-semibold text-blue-700 uppercase tracking-wide">
-              REST API — Usage Plan Settings
-            </p>
-            <Field label="Partner Name">
-              <input
-                type="text" value={form.partner_name} onChange={set('partner_name')}
-                placeholder="e.g. hsbc, barclays"
-                className={input}
-              />
-            </Field>
-            <div className="grid grid-cols-2 gap-3">
-              <Field label="Quota / Day">
-                <input type="number" value={form.quota_per_day} onChange={set('quota_per_day')} min={1} className={input} />
-              </Field>
-              <Field label="Rate (req/s)">
-                <input type="number" value={form.rate_limit_per_second} onChange={set('rate_limit_per_second')} min={1} className={input} />
-              </Field>
-            </div>
-          </div>
-        )}
-
-        {/* Inline error banner — persists until user edits form or retries */}
+        {/* Inline error banner */}
         {errorMsg && (
           <div className="flex items-start gap-3 p-4 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
             {/* Error icon */}
